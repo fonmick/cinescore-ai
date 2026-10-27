@@ -1,11 +1,19 @@
-from flask import Flask, request, jsonify, render_template_string
-import requests
-from bs4 import BeautifulSoup
-import re
+import json
 import os
+import re
 from urllib.parse import urlparse
 
+import requests
+from bs4 import BeautifulSoup
+from flask import Flask, jsonify, render_template_string, request
+
 app = Flask(__name__)
+
+OMDB_URL = "https://www.omdbapi.com/"
+USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+)
 
 PAGE = r"""
 <!doctype html>
@@ -13,200 +21,302 @@ PAGE = r"""
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>CinéScore AI — Notes IMDb</title>
+<title>CinéScore AI</title>
 <style>
-:root{color-scheme:dark;--bg:#0b1020;--panel:#141c30;--line:#293550;--muted:#9aa8c2;--text:#f4f6fb;--accent:#f5c518;--blue:#8bb5ff}
-*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at top,#172443 0%,var(--bg) 55%);font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif;color:var(--text)}
-main{max-width:1100px;margin:0 auto;padding:34px 18px 60px}.brand{display:flex;align-items:center;gap:14px;margin-bottom:25px}.logo{background:var(--accent);color:#171717;font-weight:900;font-size:22px;border-radius:13px;padding:12px}.brand h1{font-size:26px;margin:0}.brand p{color:var(--muted);margin:2px 0 0}.panel{background:rgba(20,28,48,.94);border:1px solid var(--line);border-radius:18px;padding:22px;margin:16px 0;box-shadow:0 12px 35px #0002}.panel h2{font-size:17px;margin:0 0 14px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.field{display:flex;flex-direction:column;gap:7px}label{font-weight:650;font-size:13px;color:#dbe3f4}input,textarea{background:#0b1223;color:var(--text);border:1px solid #34415e;border-radius:10px;padding:12px;font:inherit;width:100%;outline:none}input:focus,textarea:focus{border-color:var(--blue)}textarea{min-height:110px;resize:vertical}.hint{color:var(--muted);font-size:12px}.actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:16px}button{border:0;border-radius:10px;padding:11px 16px;font:inherit;font-weight:750;cursor:pointer;background:var(--accent);color:#171717}button.secondary{background:#25324d;color:var(--text);border:1px solid #394967}button:disabled{opacity:.55;cursor:wait}.status{margin-top:12px;color:var(--muted);white-space:pre-wrap}.stats{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}.stat{background:#0b1223;border:1px solid var(--line);padding:10px 14px;border-radius:12px;color:var(--muted)}.stat strong{color:var(--text);font-size:18px;margin-right:6px}.tablewrap{overflow:auto}table{width:100%;border-collapse:collapse;min-width:650px}th,td{text-align:left;padding:13px 12px;border-bottom:1px solid var(--line)}th{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;cursor:pointer;white-space:nowrap}th:hover{color:var(--accent)}td a{color:#a9c8ff;text-decoration:none}td a:hover{text-decoration:underline}.rating{display:inline-block;background:#f5c518;color:#161616;font-weight:850;border-radius:7px;padding:3px 8px}.empty{text-align:center;color:var(--muted);padding:28px}.pill{font-size:11px;border:1px solid #394967;border-radius:20px;padding:3px 8px;color:var(--muted)}footer{color:var(--muted);font-size:12px;margin-top:20px}
-@media(max-width:700px){.grid{grid-template-columns:1fr}.panel{padding:16px}.brand h1{font-size:22px}}
+:root{color-scheme:dark;--bg:#10131b;--panel:#191e2a;--line:#30394b;--text:#f3f5fa;--muted:#a9b2c5;--accent:#f6c453}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+main{max-width:1100px;margin:0 auto;padding:28px 16px 60px}h1{margin:0;font-size:clamp(28px,5vw,42px)}.sub{color:var(--muted);margin:5px 0 24px}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:18px;margin:16px 0}
+label{display:block;font-weight:650;margin:12px 0 5px}input,textarea,button{font:inherit;border-radius:9px}
+input,textarea{width:100%;background:#0f131c;color:var(--text);border:1px solid var(--line);padding:11px}
+textarea{min-height:90px;resize:vertical}.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+button{border:0;background:var(--accent);color:#211b0b;padding:12px 18px;font-weight:750;cursor:pointer;margin-top:15px}
+button:disabled{opacity:.6;cursor:wait}.hint{color:var(--muted);font-size:13px}.status{margin:14px 0;color:var(--muted)}
+.tablewrap{overflow-x:auto}table{width:100%;border-collapse:collapse;min-width:680px}th,td{text-align:left;padding:10px;border-bottom:1px solid var(--line)}th{color:var(--muted);cursor:pointer;white-space:nowrap}td.rating{font-weight:800;color:var(--accent)}a{color:var(--accent)}.poster{width:42px;height:60px;object-fit:cover;border-radius:4px;background:#282e3b}
+@media(max-width:650px){.grid{grid-template-columns:1fr}.panel{padding:14px}}
 </style>
 </head>
 <body><main>
-<header class="brand"><div class="logo">CS</div><div><h1>CinéScore AI</h1><p>Retrouve les notes IMDb et classe tes films.</p></div><span class="pill">Application web</span></header>
+<h1>🎬 CinéScore AI</h1>
+<p class="sub">Récupère les films d’un catalogue et compare leurs notes IMDb.</p>
 <section class="panel">
-<h2>1. Source des films</h2>
+<form id="searchForm">
+<label for="url">URL du catalogue de films</label>
+<input id="url" type="url" placeholder="https://exemple.com/catalogue" value="https://danovli.com/e5b7668/c/danovli/12/0">
 <div class="grid">
-<div class="field"><label for="siteUrl">URL de la page catalogue</label><input id="siteUrl" type="url" placeholder="https://exemple.com/films"><span class="hint">Le serveur tentera d'extraire les titres visibles et les liens de la page.</span></div>
-<div class="field"><label for="selector">Sélecteur CSS des titres (facultatif)</label><input id="selector" placeholder="ex. .movie-card h2"><span class="hint">Si l'extraction automatique se trompe, indique le sélecteur HTML des titres.</span></div>
+<div><label for="selector">Sélecteur CSS (facultatif)</label><input id="selector" placeholder="Ex. .movie-card"></div>
+<div><label for="year">Année (facultative, pour tous les titres)</label><input id="year" type="number" min="1888" max="2100" placeholder="2026"></div>
 </div>
-<div class="field" style="margin-top:14px"><label for="titles">Ou colle les titres manuellement (un par ligne)</label><textarea id="titles">Dune
-Interstellar
-Inception</textarea></div>
-<div class="grid" style="margin-top:14px">
-<div class="field"><label for="apiKey">Clé API OMDb</label><input id="apiKey" type="password" placeholder="Ta clé OMDb"><span class="hint">Nécessaire pour récupérer les notes IMDb. Obtiens une clé sur omdbapi.com.</span></div>
-<div class="field"><label for="year">Année (facultatif)</label><input id="year" type="number" min="1888" max="2100" placeholder="Ex. 2021"><span class="hint">Aide à distinguer les films qui portent le même titre.</span></div>
-</div>
-<div class="actions"><button id="runBtn" onclick="runSearch()">Rechercher les notes IMDb</button><button class="secondary" onclick="loadDemo()">Charger l'exemple</button><button class="secondary" onclick="exportCsv()">Exporter CSV</button></div>
-<div id="status" class="status" role="status">Prêt. Saisis une clé OMDb pour effectuer des recherches réelles.</div>
+<label for="titles">Titres à ajouter manuellement (facultatif)</label>
+<textarea id="titles" placeholder="Un film par ligne"></textarea>
+<label for="apikey">Clé API OMDb</label>
+<input id="apikey" type="password" autocomplete="off" placeholder="Saisis ta clé OMDb">
+<p class="hint">La clé n’est pas enregistrée par cette page. Elle est utilisée pour la recherche envoyée au serveur.</p>
+<button id="submit" type="submit">Analyser les films</button>
+</form>
+<div id="status" class="status" role="status"></div>
 </section>
-<section class="panel">
-<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><h2 style="margin:0 0 14px">2. Résultats</h2><span class="pill">Clique sur un en-tête pour trier</span></div>
-<div class="stats"><div class="stat"><strong id="count">0</strong> films</div><div class="stat"><strong id="avg">—</strong> note moyenne</div><div class="stat"><strong id="found">0</strong> notes trouvées</div></div>
-<div class="tablewrap"><table><thead><tr><th data-key="title">Film ↕</th><th data-key="year">Année ↕</th><th data-key="rating">Note IMDb ↕</th><th data-key="votes">Votes ↕</th><th>Fiche</th></tr></thead><tbody id="results"><tr><td colspan="5" class="empty">Les résultats apparaîtront ici.</td></tr></tbody></table></div>
+<section class="panel" id="resultsPanel" hidden>
+<h2>Résultats <span id="count" class="hint"></span></h2>
+<div class="tablewrap"><table><thead><tr>
+<th data-sort="title">Film ↕</th><th data-sort="year">Année ↕</th><th data-sort="imdbRating">Note IMDb ↕</th><th data-sort="imdbVotes">Votes ↕</th><th>IMDb</th>
+</tr></thead><tbody id="rows"></tbody></table></div>
 </section>
-<footer>Les notes sont fournies par OMDb à partir des données IMDb. Ce prototype ne contourne pas les protections d'accès d'un site : certains catalogues peuvent bloquer l'extraction, exiger une connexion ou charger les films par JavaScript. N'utilise que des sites et des données auxquels tu es autorisé à accéder.</footer>
 </main>
 <script>
-let rows=[]; let sortKey='rating'; let sortDir=-1;
-document.querySelectorAll('th[data-key]').forEach(th=>th.addEventListener('click',()=>{const k=th.dataset.key;if(sortKey===k)sortDir*=-1;else{sortKey=k;sortDir=(k==='title'?-1:1)}render()}));
-function loadDemo(){document.getElementById('titles').value='Dune\\nInterstellar\\nInception';document.getElementById('siteUrl').value='';document.getElementById('selector').value='';}
-async function runSearch(){
- const key=document.getElementById('apiKey').value.trim(), url=document.getElementById('siteUrl').value.trim(), selector=document.getElementById('selector').value.trim(), manual=document.getElementById('titles').value;
- if(!key){setStatus('Ajoute ta clé API OMDb. Sans clé, les notes IMDb ne peuvent pas être récupérées automatiquement.');return}
- if(!url && !manual.trim()){setStatus('Saisis une URL de catalogue ou une liste de titres.');return}
- const btn=document.getElementById('runBtn');btn.disabled=true;rows=[];render();setStatus('Extraction des titres et recherche des notes IMDb…');
- try{
-  const r=await fetch('/api/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({api_key:key,url,selector,titles:manual,year:document.getElementById('year').value})});
-  const data=await r.json(); if(!r.ok)throw new Error(data.error||'Erreur de recherche');
-  rows=data.results||[];render();setStatus(data.message||`Terminé : ${rows.length} résultat(s).`);
- }catch(e){setStatus('Impossible de terminer la recherche : '+e.message+'\\nVérifie que le serveur tourne, que la clé OMDb est valide et que le site autorise l’accès.')}
- finally{btn.disabled=false}
-}
-function setStatus(s){document.getElementById('status').textContent=s}
+const form=document.getElementById('searchForm'), statusEl=document.getElementById('status'), submit=document.getElementById('submit');
+let results=[], sortKey='imdbRating', sortDesc=true;
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function render(){
- const body=document.getElementById('results');
- const sorted=[...rows].sort((a,b)=>{let x=a[sortKey],y=b[sortKey];if(x==null)x=sortKey==='title'?'':-1;if(y==null)y=sortKey==='title'?'':-1;if(typeof x==='string')return x.localeCompare(y,'fr')*sortDir;return (x-y)*sortDir});
- body.innerHTML='';
- if(!sorted.length)body.innerHTML='<tr><td colspan="5" class="empty">Aucun résultat pour le moment.</td></tr>';
- sorted.forEach(r=>{const tr=document.createElement('tr');const rating=r.rating==null?'—':`<span class="rating">${Number(r.rating).toFixed(1)} / 10</span>`;tr.innerHTML=`<td>${esc(r.title||'Titre inconnu')}</td><td>${esc(r.year||'—')}</td><td>${rating}</td><td>${r.votes==null?'—':Number(r.votes).toLocaleString('fr-FR')}</td><td>${r.imdb_url?`<a href="${esc(r.imdb_url)}" target="_blank" rel="noopener">IMDb ↗</a>`:'—'}</td>`;body.appendChild(tr)});
- document.getElementById('count').textContent=rows.length;
- const rated=rows.filter(r=>typeof r.rating==='number');document.getElementById('found').textContent=rated.length;
- document.getElementById('avg').textContent=rated.length?(rated.reduce((s,r)=>s+r.rating,0)/rated.length).toFixed(1)+'/10':'—';
+ const sorted=[...results].sort((a,b)=>{
+  let av=a[sortKey],bv=b[sortKey];
+  if(sortKey==='imdbRating'||sortKey==='year') {av=parseFloat(av)||0;bv=parseFloat(bv)||0;}
+  if(sortKey==='imdbVotes'){av=Number(String(av||'').replace(/,/g,''))||0;bv=Number(String(bv||'').replace(/,/g,''))||0;}
+  const cmp=typeof av==='number'&&typeof bv==='number'?av-bv:String(av||'').localeCompare(String(bv||''),'fr');
+  return sortDesc?-cmp:cmp;
+ });
+ document.getElementById('rows').innerHTML=sorted.map(m=>`<tr>
+ <td>${m.Poster&&m.Poster!=='N/A'?`<img class="poster" src="${esc(m.Poster)}" alt=""> `:''}<strong>${esc(m.Title)}</strong><div class="hint">${esc(m.Type||'')}</div></td>
+ <td>${esc(m.Year||'—')}</td><td class="rating">${esc(m.imdbRating||'N/A')}</td><td>${esc(m.imdbVotes||'—')}</td>
+ <td>${m.imdbID?`<a href="https://www.imdb.com/title/${esc(m.imdbID)}/" target="_blank" rel="noopener">Ouvrir ↗</a>`:'—'}</td></tr>`).join('');
+ document.getElementById('count').textContent=`(${results.length} film(s))`;
 }
-function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
-function exportCsv(){if(!rows.length){setStatus('Aucun résultat à exporter.');return}const q=v=>'"'+String(v??'').replace(/"/g,'""')+'"';const csv='Film,Année,Note IMDb,Votes,URL IMDb\\n'+rows.map(r=>[r.title,r.year,r.rating,r.votes,r.imdb_url].map(q).join(',')).join('\\n');const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\\ufeff'+csv],{type:'text/csv;charset=utf-8'}));a.download='cinescore-imdb.csv';a.click();URL.revokeObjectURL(a.href)}
-</script></body></html>
+document.querySelectorAll('th[data-sort]').forEach(th=>th.addEventListener('click',()=>{const k=th.dataset.sort;if(sortKey===k)sortDesc=!sortDesc;else{sortKey=k;sortDesc=k==='imdbRating';}render();}));
+form.addEventListener('submit',async e=>{
+ e.preventDefault();submit.disabled=true;statusEl.textContent='Analyse en cours…';document.getElementById('resultsPanel').hidden=true;
+ try{
+  const payload={url:document.getElementById('url').value.trim(),selector:document.getElementById('selector').value.trim(),year:document.getElementById('year').value.trim(),titles:document.getElementById('titles').value,api_key:document.getElementById('apikey').value.trim()};
+  const response=await fetch('/api/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  const data=await response.json();if(!response.ok)throw new Error(data.error||'Erreur lors de la recherche');
+  results=data.results||[];render();document.getElementById('resultsPanel').hidden=false;
+  statusEl.textContent=`${data.extracted_count||0} titre(s) détecté(s) automatiquement. ${data.message||''}`;
+ }catch(err){statusEl.textContent='Erreur : '+err.message;}
+ finally{submit.disabled=false;}
+});
+</script>
+</body></html>
 """
 
-def valid_http_url(url):
-    try:
-        p = urlparse(url)
-        return p.scheme in ("http", "https") and bool(p.netloc)
-    except Exception:
-        return False
+def clean_title(value):
+    """Normalise a possible movie title and removes obvious UI labels."""
+    if not value:
+        return ""
+    value = re.sub(r"\s+", " ", str(value)).strip()
+    value = re.sub(r"^(?:film|movie)\s*[:\-]\s*", "", value, flags=re.I)
+    value = re.sub(r"\s*(?:[-|]\s*)?(?:regarder|watch online|streaming|bande annonce|trailer|play)\s*$", "", value, flags=re.I)
+    value = value.strip(" \t\r\n|•–—-")
+    if len(value) < 2 or len(value) > 140:
+        return ""
+    if value.lower() in {"accueil", "home", "films", "movies", "catalogue", "catalog", "menu", "recherche", "search", "connexion", "login", "play", "watch"}:
+        return ""
+    if not re.search(r"[A-Za-zÀ-ÖØ-öø-ÿ0-9]", value):
+        return ""
+    return value
 
-def clean_title(s):
-    s = re.sub(r'\s+', ' ', s or '').strip()
-    s = re.sub(r'\s*[\|\-–—]\s*(official trailer|trailer|watch online|streaming|netflix|prime video).*$', '', s, flags=re.I)
-    s = re.sub(r'\s*\((?:19|20)\d{2}\)\s*$', '', s)
-    return s.strip(' -|:·')
+def split_year(value):
+    """Return (title, year) when a four-digit year is attached to a title."""
+    value = clean_title(value)
+    if not value:
+        return "", ""
+    match = re.match(r"^\s*((?:18|19|20)\d{2})\s*[-:|–—]?\s+(.+?)\s*$", value)
+    if match:
+        title = clean_title(match.group(2))
+        return (title, match.group(1)) if title else ("", "")
+    match = re.match(r"^\s*(.+?)\s*[\(\[]((?:18|19|20)\d{2})[\)\]]\s*$", value)
+    if match:
+        return clean_title(match.group(1)), match.group(2)
+    match = re.match(r"^\s*(.+?)\s*[-–|]\s*((?:18|19|20)\d{2})\s*$", value)
+    if match:
+        return clean_title(match.group(1)), match.group(2)
+    return value, ""
+
+def values_from_jsonld(node, found):
+    if isinstance(node, dict):
+        typ = node.get("@type", "")
+        name = node.get("name")
+        if isinstance(name, str) and any(t in str(typ).lower() for t in ("movie", "creativework", "episode")):
+            found.append(name)
+        # Catalogs often wrap titles in ItemList -> itemListElement -> item.
+        for key, val in node.items():
+            if key in {"name", "description", "image", "url", "sameAs"}:
+                continue
+            values_from_jsonld(val, found)
+    elif isinstance(node, list):
+        for item in node:
+            values_from_jsonld(item, found)
 
 def extract_titles(url, selector=""):
-    if not valid_http_url(url):
+    """Extract catalog titles from visible text, poster image attributes and page metadata."""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
         raise ValueError("L’URL doit commencer par http:// ou https://.")
-    headers = {"User-Agent": "Mozilla/5.0 (compatible; CineScoreAI/1.0)"}
-    resp = requests.get(url, headers=headers, timeout=18)
-    resp.raise_for_status()
-    if len(resp.content) > 8_000_000:
-        raise ValueError("Page trop volumineuse (limite de 8 Mo).")
-    soup = BeautifulSoup(resp.text, "html.parser")
-    for tag in soup(["script", "style", "noscript", "svg", "nav", "footer", "header"]):
-        tag.decompose()
-    candidates = []
+    response = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=25)
+    response.raise_for_status()
+    soup = BeautifulSoup(response.text, "html.parser")
+    found = []
+
+    # Read structured movie metadata before removing scripts.
+    for script in soup.select('script[type="application/ld+json"]'):
+        try:
+            values_from_jsonld(json.loads(script.string or script.get_text()), found)
+        except (ValueError, TypeError, json.JSONDecodeError):
+            pass
+
+    # A custom CSS selector lets the user target a title/card area if needed.
     if selector:
         try:
-            nodes = soup.select(selector)
-        except Exception as e:
-            raise ValueError("Sélecteur CSS invalide : " + str(e))
-        for node in nodes:
-            val = node.get("title") or node.get("alt") or node.get_text(" ", strip=True)
-            title = clean_title(val)
-            if 1 < len(title) < 100:
-                candidates.append(title)
-    else:
-        # Prefer common title headings and card links; fall back to headings.
-        for node in soup.select('[itemprop="name"], [class*="movie-title"], [class*="film-title"], [class*="title"], article h2, article h3, .card h2, .card h3, h1, h2, h3'):
-            val = node.get("content") or node.get("title") or node.get_text(" ", strip=True)
-            title = clean_title(val)
-            if 2 < len(title) < 85 and not re.search(r'^(home|accueil|films?|series?|menu|connexion|recherche|popular|latest)$', title, re.I):
-                candidates.append(title)
-        # Add meaningful linked titles if very few headings were found.
-        if len(candidates) < 3:
-            for a in soup.select('a[title], a'):
-                val = a.get("title") or a.get_text(" ", strip=True)
-                title = clean_title(val)
-                if 2 < len(title) < 85 and not re.search(r'(login|sign up|cookie|privacy|terms|facebook|instagram|twitter)', title, re.I):
-                    candidates.append(title)
-    # Preserve order while removing duplicates.
-    out, seen = [], set()
-    for title in candidates:
-        key = re.sub(r'[^a-z0-9]', '', title.lower())
-        if key and key not in seen:
-            seen.add(key); out.append(title)
-    if not out:
-        raise ValueError("Aucun titre détecté. Colle les titres manuellement ou précise un sélecteur CSS.")
-    return out[:100]
+            selected = soup.select(selector)
+        except Exception as exc:
+            raise ValueError("Le sélecteur CSS n’est pas valide.") from exc
+        for node in selected:
+            for attr in ("title", "aria-label", "alt", "data-title", "data-name"):
+                val = node.get(attr) if hasattr(node, "get") else None
+                if val:
+                    found.append(val)
+            if hasattr(node, "get_text"):
+                found.append(node.get_text(" ", strip=True))
+
+    # Main extraction: anchors and poster images, including enclosing card/link labels.
+    for img in soup.find_all("img"):
+        candidates = [img.get("alt"), img.get("title"), img.get("data-title"), img.get("data-name")]
+        for attr, val in img.attrs.items():
+            if attr.startswith("data-") and isinstance(val, str) and any(k in attr.lower() for k in ("title", "name", "movie", "film")):
+                candidates.append(val)
+        anchor = img.find_parent("a")
+        if anchor:
+            candidates.extend([anchor.get("title"), anchor.get("aria-label"), anchor.get_text(" ", strip=True)])
+        # Add text/title from nearby card containers; keep this constrained to short values.
+        parent = img.parent
+        for _ in range(3):
+            if not parent or getattr(parent, "name", None) in {"body", "html"}:
+                break
+            for attr in ("title", "aria-label", "data-title", "data-name"):
+                val = parent.get(attr) if hasattr(parent, "get") else None
+                if val:
+                    candidates.append(val)
+            text = parent.get_text(" ", strip=True) if hasattr(parent, "get_text") else ""
+            if text and len(text) <= 140:
+                candidates.append(text)
+            parent = parent.parent
+        found.extend(c for c in candidates if c)
+
+    # Standard title headings and links.
+    for node in soup.select('[itemprop="name"], [class*="movie-title"], [class*="film-title"], [class*="title"], article h2, article h3, .card h2, .card h3, h1, h2, h3, a[title], a[aria-label]'):
+        for attr in ("content", "title", "aria-label", "data-title", "data-name"):
+            val = node.get(attr)
+            if val:
+                found.append(val)
+        text = node.get_text(" ", strip=True)
+        if text:
+            found.append(text)
+
+    # Remove common non-content areas from any remaining broad heading/link extraction.
+    for node in soup.select("nav, footer, header, script, style, noscript, svg"):
+        node.decompose()
+
+    titles = []
+    seen = set()
+    for raw in found:
+        title, year = split_year(raw)
+        if not title:
+            continue
+        # Ignore obvious URLs, asset filenames and very generic navigation labels.
+        if title.startswith(("http://", "https://", "data:image")):
+            continue
+        if re.search(r"\.(?:jpg|jpeg|png|webp|gif|svg)$", title, re.I):
+            continue
+        key = (title.casefold(), year)
+        if key not in seen:
+            seen.add(key)
+            titles.append({"title": title, "year": year})
+    return titles
 
 def lookup_omdb(title, api_key, year=""):
     params = {"apikey": api_key, "t": title, "type": "movie"}
-    if year:
-        params["y"] = year
-    resp = requests.get("https://www.omdbapi.com/", params=params, timeout=12)
-    resp.raise_for_status()
-    data = resp.json()
-    if data.get("Response") != "True":
-        # Fallback search results can help when exact title doesn't match.
-        sr = requests.get("https://www.omdbapi.com/", params={"apikey": api_key, "s": title, "type": "movie", **({"y": year} if year else {})}, timeout=12)
-        sr.raise_for_status()
-        sd = sr.json()
-        if sd.get("Response") == "True" and sd.get("Search"):
-            imdb_id = sd["Search"][0].get("imdbID")
-            if imdb_id:
-                d2 = requests.get("https://www.omdbapi.com/", params={"apikey": api_key, "i": imdb_id}, timeout=12).json()
-                if d2.get("Response") == "True":
-                    data = d2
-                else:
-                    return {"title": title, "year": "", "rating": None, "votes": None, "imdb_url": None, "error": "Fiche non trouvée"}
-            else:
-                return {"title": title, "year": "", "rating": None, "votes": None, "imdb_url": None, "error": "Fiche non trouvée"}
-        else:
-            return {"title": title, "year": "", "rating": None, "votes": None, "imdb_url": None, "error": data.get("Error", "Fiche non trouvée")}
-    rating = data.get("imdbRating")
-    votes = data.get("imdbVotes")
-    try: rating = float(rating) if rating and rating != "N/A" else None
-    except ValueError: rating = None
-    try: votes = int(votes.replace(",", "")) if votes and votes != "N/A" else None
-    except ValueError: votes = None
-    imdb_id = data.get("imdbID")
-    return {"title": data.get("Title", title), "year": data.get("Year", ""), "rating": rating, "votes": votes,
-            "imdb_url": f"https://www.imdb.com/title/{imdb_id}/" if imdb_id else None,
-            "error": None if rating is not None else "Note indisponible"}
+    if year and str(year).isdigit():
+        params["y"] = str(year)
+    response = requests.get(OMDB_URL, params=params, headers={"User-Agent": USER_AGENT}, timeout=15)
+    response.raise_for_status()
+    data = response.json()
+    if data.get("Response") == "True" and data.get("imdbID"):
+        return data
+    # Fallback search can rescue slightly different catalog naming.
+    params = {"apikey": api_key, "s": title, "type": "movie"}
+    if year and str(year).isdigit():
+        params["y"] = str(year)
+    response = requests.get(OMDB_URL, params=params, headers={"User-Agent": USER_AGENT}, timeout=15)
+    response.raise_for_status()
+    search_data = response.json()
+    if search_data.get("Response") == "True" and search_data.get("Search"):
+        first = search_data["Search"][0]
+        detail_params = {"apikey": api_key, "i": first.get("imdbID"), "type": "movie"}
+        response = requests.get(OMDB_URL, params=detail_params, headers={"User-Agent": USER_AGENT}, timeout=15)
+        response.raise_for_status()
+        detail = response.json()
+        if detail.get("Response") == "True":
+            return detail
+    return {"Response": "False", "Error": data.get("Error", "Film introuvable")}
 
 @app.get("/")
-def index():
+def home():
     return render_template_string(PAGE)
 
 @app.post("/api/search")
 def api_search():
     data = request.get_json(silent=True) or {}
-    api_key = (data.get("api_key") or "").strip()
-    if not api_key:
-        return jsonify(error="Clé API OMDb manquante."), 400
-    titles = []
     url = (data.get("url") or "").strip()
-    try:
-        if url:
-            titles.extend(extract_titles(url, (data.get("selector") or "").strip()))
-        titles.extend(clean_title(t) for t in (data.get("titles") or "").splitlines() if clean_title(t))
-        titles = list(dict.fromkeys(titles))[:100]
-        if not titles:
-            return jsonify(error="Aucun titre fourni ou détecté."), 400
-    except requests.RequestException as e:
-        return jsonify(error=f"Impossible de lire le site : {e}. Le site peut bloquer les requêtes ou nécessiter JavaScript."), 400
-    except ValueError as e:
-        return jsonify(error=str(e)), 400
-    year = str(data.get("year") or "").strip()
-    results, errors = [], []
-    for title in titles:
+    selector = (data.get("selector") or "").strip()
+    manual_titles = (data.get("titles") or "").splitlines()
+    api_key = (data.get("api_key") or os.environ.get("OMDB_API_KEY") or "").strip()
+    default_year = str(data.get("year") or "").strip()
+
+    if not api_key:
+        return jsonify(error="Saisis ta clé API OMDb dans le champ prévu."), 400
+
+    extracted = []
+    if url:
         try:
-            item = lookup_omdb(title, api_key, year)
-            results.append(item)
-        except Exception as e:
-            results.append({"title": title, "year": "", "rating": None, "votes": None, "imdb_url": None, "error": str(e)})
+            extracted = extract_titles(url, selector)
+        except requests.RequestException as exc:
+            return jsonify(error=f"Impossible de lire le catalogue : {exc}"), 400
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 400
+
+    for raw in manual_titles:
+        title, year = split_year(raw)
+        if title:
+            extracted.append({"title": title, "year": year})
+
+    # Deduplicate while preserving order; manual titles are still supported.
+    unique = []
+    seen = set()
+    for item in extracted:
+        title = clean_title(item.get("title", ""))
+        year = str(item.get("year") or "").strip()
+        key = (title.casefold(), year)
+        if title and key not in seen:
+            seen.add(key)
+            unique.append({"title": title, "year": year})
+
+    if not unique:
+        return jsonify(error="Aucun titre détecté. Essaie un sélecteur CSS ou ajoute quelques titres manuellement."), 400
+
+    results = []
+    errors = []
+    for item in unique[:100]:
+        title = item["title"]
+        year = item["year"] or default_year
+        try:
+            movie = lookup_omdb(title, api_key, year)
+            if movie.get("Response") == "True":
+                results.append(movie)
+            else:
+                errors.append(title)
+        except (requests.RequestException, ValueError) as exc:
             errors.append(title)
-    message = f"{len(results)} film(s) traité(s), {sum(1 for x in results if x['rating'] is not None)} note(s) trouvée(s)."
-    if errors: message += " Certaines recherches ont échoué (réseau/API)."
-    return jsonify(results=results, message=message)
+    results.sort(key=lambda m: float(m.get("imdbRating", "0")) if m.get("imdbRating") not in (None, "", "N/A") else 0, reverse=True)
+    message = f"{len(errors)} titre(s) sans résultat IMDb." if errors else "Recherche terminée."
+    return jsonify(results=results, extracted_count=len(unique), message=message)
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=False)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "5000")))
