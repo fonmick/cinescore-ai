@@ -50,7 +50,7 @@ button:disabled{opacity:.6;cursor:wait}.hint{color:var(--muted);font-size:13px}.
 <label for="titles">Titres à ajouter manuellement (facultatif)</label>
 <textarea id="titles" placeholder="Un film par ligne"></textarea>
 <label for="apikey">Clé API OMDb</label>
-<input id="apikey" type="password" autocomplete="off" placeholder="Saisis ta clé OMDb">
+<input id="apikey" type="password" name="password" autocomplete="current-password" placeholder="Saisis la clé OMDb">
 <p class="hint">La clé n’est pas enregistrée par cette page. Elle est utilisée pour la recherche envoyée au serveur.</p>
 <button id="submit" type="submit">Analyser les films</button>
 </form>
